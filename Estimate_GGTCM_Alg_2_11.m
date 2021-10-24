@@ -10,9 +10,9 @@ clc;
 
 %---------------------------- Load data --------------------------------%
 %----------------------------CW 11 9063---------------------------------%
-position_x = 1;
-position_y = 1;
-pcnt_inliers = 0.95;
+position_x = 8;
+position_y = 8;
+pcnt_inliers = 0.96;
 myFolder = './';
 if ~isfolder(myFolder)
     errorMessage = sprintf('Error: The following folder does not exist:\n%s\nPlease specify a new folder.', myFolder);
@@ -40,6 +40,7 @@ end
 fprintf('load Done!\n');
 DCT_cof_pos= reshape(DCT_cof_pos,1,[]);
 Y = DCT_cof_pos;
+%Y =DCT_cof_pos(:,1:10000);
 
 %-------------------------- init para --------------------------------%
 
@@ -50,8 +51,8 @@ d = sorted_abs_DCT_cof_pos(round(size(sorted_abs_DCT_cof_pos,2)*pcnt_inliers));
 fprintf('d: %g \n',d);
 % d=0.24;
 
-a = get_max_DCT_value(8/255, position_x, position_y);
-a = max(DCT_cof_pos);
+%a = get_max_DCT_value(8/255, position_x, position_y);
+a = max(abs_DCT_cof_pos);
 % position = (1,1);
 %--------------------------   GGTCM   --------------------------------%
 fprintf('start GGTCM!\n');
@@ -101,42 +102,47 @@ function [current_alpha,current_beta,current_yc,current_b,current_G] = GGTCM_est
     Beta = 0.14;
     
     function [G, Alpha, Beta, B] = calc_g(data, N_1, N1_p, n_sample, alpha, beta, alpha_p, beta_p, y_c, a)
+        
         t = (y_c/alpha)^beta;
         t_p = (y_c/alpha_p)^beta_p;
         b_p = N1_p/n_sample;
         b_n = N_1/n_sample;
         N_yc = N1_p - N_1;
-        g_yc_in_n1 = log(b_p*beta_p/(2*alpha_p*gamma(1/beta_p)*gammainc(t_p, 1/beta_p,'lower')))-N_yc*t_p;
+        g_yc_in_n1 = N_yc*log(b_p*beta_p/(2*alpha_p*gamma(1/beta_p)*gammainc(t_p, 1/beta_p,'lower')))-N_yc*t_p;
         g_yc_in_n2 = 0;
         if a ~= y_c && b_n<1
-            g_yc_in_n2 = log((1-b_n)/(2*(a-y_c)));
+            g_yc_in_n2 = N_yc*log((1-b_n)/(2*(a-y_c)));
         end
+        
         if g_yc_in_n1>g_yc_in_n2
-            g_N1 = N1_p*log(b_p*beta_p/(2*alpha_p*gamma(1/beta_p)*gammainc(t_p, 1/beta_p,'lower')))-sum((data(:,1:N1_p)./alpha_p).^beta_p);
+            g_N1 = sum(log(b_p*beta_p/(2*alpha_p*gamma(1/beta_p)*gammainc(t_p, 1/beta_p,'lower')).*exp(-(data(:,1:N1_p)./alpha_p).^beta_p)));
             g_N2 = 0;
             if a ~= y_c && b_p<1
                 g_N2 = (n_sample-N1_p)*log((1-b_p)/(2*(a-y_c)));
             end
-            g_N3 = N_yc*g_yc_in_n1;
             Alpha = alpha_p;
             Beta = beta_p;
             B = b_p;
         else
-            g_N1 = N_1*log(b_n*beta/(2*alpha*gamma(1/beta)*gammainc(t, 1/beta,'lower')))-sum((data(:,1:N_1)./alpha).^beta);
+            g_N1 = sum(log(b_n*beta/(2*alpha*gamma(1/beta)*gammainc(t, 1/beta,'lower')).*exp(-(data(:,1:N_1)./alpha).^beta)));
             g_N2 = 0;
-            if a ~= y_c
+            if a ~= y_c && b_n<1
                 g_N2 = (n_sample-N_1)*log((1-b_n)/(2*(a-y_c)));
             end
-            g_N3 = N_yc*g_yc_in_n2;
             Alpha = alpha;
             Beta = beta;
             B = b_n;
         end
-        G = g_N1 + g_N2 + g_N3;
+        G = g_N1 + g_N2;
     end
 
-    for idx = m:n
-        fprintf('%g/%g\n',idx-m+1,n-m+1);
+    gap = round(sqrt((n)/2));
+    first_split_points = m:gap:n;
+    %first_spilt_lst = m:n;
+    first_split_g = [];
+    for idx = first_split_points
+        %fprintf('%g/%g\n',round((idx-m)/gap+1),round((n-m)/gap+1));
+        fprintf('%g/%g\n',round((idx-m)/gap+1),round((n-m)/gap+1));
         y_c = split_lst(idx);
         yc_lst = find(mean0_abs_arr==y_c);
         N1 = yc_lst(1)-1;
@@ -145,25 +151,66 @@ function [current_alpha,current_beta,current_yc,current_b,current_G] = GGTCM_est
         data_n = mean0_abs_arr(mean0_abs_arr<y_c);
         
         GGTCM_N1 = @(data_n, alpha, beta)...
-            beta./(2.*alpha.*gamma(1/beta).*gammainc((y_c/alpha).^beta, 1/beta,'lower')).*exp(-1*(data_n./alpha).^beta);
+            beta/(2*alpha*gamma(1/beta)*gammainc((y_c/alpha)^beta, 1/beta,'lower')).*exp(-1*(data_n./alpha).^beta);
         
         GGTCM_N1_p = @(data_p, alpha, beta)...
-            beta./(2.*alpha.*gamma(1/beta).*gammainc((y_c/alpha).^beta, 1/beta,'lower')).*exp(-1*(data_p./alpha).^beta);
+            beta/(2*alpha*gamma(1/beta)*gammainc((y_c/alpha)^beta, 1/beta,'lower')).*exp(-1*(data_p./alpha).^beta);
+        
         
         pd_p = mle(data_p,'pdf' ,GGTCM_N1_p ,'Start',[Alpha, Beta], 'LowerBound',[0.00000001, 0.0000001],'UpperBound',[1, 2]);
         
         pd_n = mle(data_n,'pdf' ,GGTCM_N1 ,'Start',[Alpha, Beta], 'LowerBound',[0.00000001, 0.0000001],'UpperBound',[1, 2]);
         
         [G, Alpha, Beta, B] = calc_g(mean0_abs_arr, N1, N1_P, n_sample, pd_n(1), pd_n(2), pd_p(1), pd_p(2), y_c, a);
+        
+        
+        first_split_g=[first_split_g,G];
+    end
+    [argvalue, argmax] = max(first_split_g);
+    max_idx = first_split_points(argmax);
+    if max_idx == first_split_points(1)
+        % first value is best
+        m = 1;
+        n = first_split_points(argmax+1);
+    elseif max_idx == first_split_points(end)
+        %last value is best
+        m = first_split_points(argmax-1);
+        n =  size(split_lst,2);
+    else
+        m = first_split_points(argmax-1);
+        n = first_split_points(argmax+1);
+    end
+    
+    second_split_points = m:n;
+    Alpha = 0.01;
+    Beta = 0.14;
+    for idx = second_split_points
+        fprintf('%g/%g\n',idx-m,n-m);
+        y_c = split_lst(idx);
+        yc_lst = find(mean0_abs_arr==y_c);
+        N1 = yc_lst(1)-1;
+        N1_P = yc_lst(end);
+        data_p = mean0_abs_arr(mean0_abs_arr<=y_c);
+        data_n = mean0_abs_arr(mean0_abs_arr<y_c);
+        
+        GGTCM_N1_2 = @(data_n, alpha, beta)...
+            beta/(2*alpha*gamma(1/beta)*gammainc((y_c/alpha)^beta, 1/beta,'lower')).*exp(-1*(data_n./alpha).^beta);
+        
+        GGTCM_N1_p_2 = @(data_p, alpha, beta)...
+            beta/(2*alpha*gamma(1/beta)*gammainc((y_c/alpha)^beta, 1/beta,'lower')).*exp(-1*(data_p./alpha).^beta);
 
-         if G > current_G
+        pd_p = mle(data_p,'pdf' ,GGTCM_N1_p_2 ,'Start',[Alpha, Beta], 'LowerBound',[0.00000001, 0.0000001],'UpperBound',[1, 2]);
+        
+        pd_n = mle(data_n,'pdf' ,GGTCM_N1_2 ,'Start',[Alpha, Beta], 'LowerBound',[0.00000001, 0.0000001],'UpperBound',[1, 2]);
+        
+        [G, Alpha, Beta, B] = calc_g(mean0_abs_arr, N1, N1_P, n_sample, pd_n(1), pd_n(2), pd_p(1), pd_p(2), y_c, a);
+        if G > current_G
            current_G = G;
            current_alpha = Alpha;
            current_beta = Beta;
            current_yc = y_c;
            current_b = B;
-         end
-    end
+        end
+   end
+    
 end
-
-%G 3081622

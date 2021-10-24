@@ -1,7 +1,7 @@
 clear all;
 clc;
-position_x = 1;
-position_y = 1;
+position_x = 5;
+position_y = 5;
 myFolder = './';
 if ~isfolder(myFolder)
     errorMessage = sprintf('Error: The following folder does not exist:\n%s\nPlease specify a new folder.', myFolder);
@@ -29,6 +29,8 @@ end
 fprintf('load Done!');
 
 data_n = DCT_cof_pos;
+%data_n = DCT_cof_pos(1:100000);
+
 [counts, centers] = hist(data_n, 500);
 counts = counts/sum(counts);
 bar(centers, counts);
@@ -50,6 +52,5 @@ split_lst = sort(split_lst);
 
 split_lst_size = size(split_lst, 2);
 
-
-
-G = sum(log(GG(data_n, pd(1) ,pd(2))));
+G = sum(log(GG(data_n, pd(1) ,pd(2))))
+%5.024861473781907e+06
